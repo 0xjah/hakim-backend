@@ -1,0 +1,15 @@
+# Supabase .gitignore
+
+# Local development
+.branches/
+.temp/
+
+# Secrets (DO NOT COMMIT)
+.env
+.env.*
+!.env.example
+supabase/.env
+
+# Backup files
+*.bak
+*.backup

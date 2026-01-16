@@ -1,0 +1,53 @@
+# Go Backend .gitignore
+
+# Binary output
+main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Air live reload
+.air.toml
+tmp/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+debug
+__debug_bin*
+
+# Build artifacts
+dist/
+bin/
+
+# Logs
+*.log
+logs/
