@@ -9,13 +9,13 @@ import (
 type ComplaintStatus string
 
 const (
-	StatusSubmitted   ComplaintStatus = "submitted"
-	StatusUnderReview ComplaintStatus = "under_review"
-	StatusAssigned    ComplaintStatus = "assigned"
-	StatusInProgress  ComplaintStatus = "in_progress"
-	StatusResolved    ComplaintStatus = "resolved"
-	StatusClosed      ComplaintStatus = "closed"
-	StatusRejected    ComplaintStatus = "rejected"
+	StatusSubmitted  ComplaintStatus = "submitted"
+	StatusInReview   ComplaintStatus = "in_review"
+	StatusAssigned   ComplaintStatus = "assigned"
+	StatusInProgress ComplaintStatus = "in_progress"
+	StatusResolved   ComplaintStatus = "resolved"
+	StatusClosed     ComplaintStatus = "closed"
+	StatusRejected   ComplaintStatus = "rejected"
 )
 
 type ComplaintPriority string

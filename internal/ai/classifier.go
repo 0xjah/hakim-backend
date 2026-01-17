@@ -27,9 +27,21 @@ type OpenAIRequest struct {
 	MaxTokens   int             `json:"max_tokens"`
 }
 
+// ContentPart represents either text or image content
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // "low", "high", or "auto"
+}
+
 type OpenAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // Can be string or []ContentPart
 }
 
 type OpenAIResponse struct {
@@ -59,9 +71,14 @@ func NewClassifier(client *supabase.Client) *Classifier {
 }
 
 func (c *Classifier) Classify(title, description string) (*supabase.ClassificationResult, error) {
+	return c.ClassifyWithImages(title, description, nil)
+}
+
+// ClassifyWithImages classifies a complaint with optional image attachments
+func (c *Classifier) ClassifyWithImages(title, description string, imageURLs []string) (*supabase.ClassificationResult, error) {
 	// Check if OpenAI key is configured
 	if config.AppConfig.OpenAIKey != "" {
-		result, err := c.classifyWithAI(title, description)
+		result, err := c.classifyWithAI(title, description, imageURLs)
 		if err == nil {
 			return result, nil
 		}
@@ -73,7 +90,7 @@ func (c *Classifier) Classify(title, description string) (*supabase.Classificati
 	return c.classifyWithKeywords(title, description)
 }
 
-func (c *Classifier) classifyWithAI(title, description string) (*supabase.ClassificationResult, error) {
+func (c *Classifier) classifyWithAI(title, description string, imageURLs []string) (*supabase.ClassificationResult, error) {
 	// Get available categories for context
 	categories, err := c.client.GetCategories()
 	if err != nil {
@@ -90,11 +107,20 @@ func (c *Classifier) classifyWithAI(title, description string) (*supabase.Classi
 	}
 
 	// Create the prompt for GPT
+	imageInstructions := ""
+	if len(imageURLs) > 0 {
+		imageInstructions = `
+إذا تم إرفاق صور، قم بتحليلها لفهم المشكلة بشكل أفضل:
+- حدد نوع المشكلة من الصورة (تلف، تسرب، كسر، إلخ)
+- قيّم مدى خطورة المشكلة بناءً على الصورة
+- استخدم المعلومات المرئية لتحسين دقة التصنيف`
+	}
+
 	systemPrompt := `أنت مساعد ذكي لنظام حكيم لإدارة شكاوى المواطنين في المملكة العربية السعودية.
 مهمتك تحليل الشكاوى وتصنيفها.
 
 التصنيفات المتاحة:
-` + categoryList.String() + `
+` + categoryList.String() + imageInstructions + `
 
 قم بالرد بصيغة JSON فقط بالشكل التالي:
 {
@@ -102,7 +128,8 @@ func (c *Classifier) classifyWithAI(title, description string) (*supabase.Classi
   "priority": "low/medium/high/critical",
   "confidence": 0.0-1.0,
   "summary_ar": "ملخص قصير بالعربية (30 كلمة كحد أقصى)",
-  "sentiment": "neutral/frustrated/angry/satisfied"
+  "sentiment": "neutral/frustrated/angry/satisfied",
+  "image_analysis": "وصف ما تم اكتشافه في الصور (إن وجدت)"
 }
 
 معايير تحديد الأولوية:
@@ -113,15 +140,37 @@ func (c *Classifier) classifyWithAI(title, description string) (*supabase.Classi
 
 	userPrompt := fmt.Sprintf("عنوان الشكوى: %s\n\nتفاصيل الشكوى: %s", title, description)
 
+	// Build user message content
+	var userContent interface{}
+	if len(imageURLs) > 0 {
+		// Multimodal message with text and images
+		contentParts := []ContentPart{
+			{Type: "text", Text: userPrompt},
+		}
+		for _, imgURL := range imageURLs {
+			contentParts = append(contentParts, ContentPart{
+				Type: "image_url",
+				ImageURL: &ImageURL{
+					URL:    imgURL,
+					Detail: "high", // Use high detail for better analysis
+				},
+			})
+		}
+		userContent = contentParts
+	} else {
+		// Text-only message
+		userContent = userPrompt
+	}
+
 	// Call OpenAI API
 	reqBody := OpenAIRequest{
-		Model: "gpt-4o-mini",
+		Model: "openai/gpt-5.1-codex-max",
 		Messages: []OpenAIMessage{
 			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
+			{Role: "user", Content: userContent},
 		},
 		Temperature: 0.3,
-		MaxTokens:   500,
+		MaxTokens:   2000,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -129,13 +178,15 @@ func (c *Classifier) classifyWithAI(title, description string) (*supabase.Classi
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+config.AppConfig.OpenAIKey)
+	req.Header.Set("HTTP-Referer", "https://hakim.sa")
+	req.Header.Set("X-Title", "HAKIM Complaint System")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

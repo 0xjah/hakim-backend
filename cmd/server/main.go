@@ -50,6 +50,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(supabaseClient)
 	complaintHandler := handlers.NewComplaintHandler(supabaseClient, classifier)
 	adminHandler := handlers.NewAdminHandler(supabaseClient)
+	publicHandler := handlers.NewPublicHandler(supabaseClient)
 
 	// Routes
 	api := app.Group("/api/v1")
@@ -102,6 +103,8 @@ func main() {
 	// Public data routes (must be before protected routes)
 	api.Get("/departments", adminHandler.ListDepartments)
 	api.Get("/categories", adminHandler.ListCategories)
+	api.Get("/public/map", publicHandler.GetPublicMapData)
+	api.Get("/public/map/stats", publicHandler.GetPublicMapStats)
 
 	// Protected routes
 	protected := api.Group("", middleware.AuthMiddleware(supabaseClient))

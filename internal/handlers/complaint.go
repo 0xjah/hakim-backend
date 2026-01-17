@@ -44,8 +44,8 @@ func (h *ComplaintHandler) Create(c *fiber.Ctx) error {
 		return utils.JSONError(c, fiber.StatusBadRequest, "Title and description are required")
 	}
 
-	// AI classification
-	classification, err := h.classifier.Classify(req.Title, req.Description)
+	// AI classification with image support
+	classification, err := h.classifier.ClassifyWithImages(req.Title, req.Description, req.Attachments)
 	if err != nil {
 		slog.Warn("AI classification failed", "error", err)
 		// Continue without classification
