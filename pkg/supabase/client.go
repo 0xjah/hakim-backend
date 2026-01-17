@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1009,7 +1010,7 @@ type PublicMapStats struct {
 // GetPublicMapData returns aggregated complaint data for the public community map
 // This returns anonymized location data grouped by area
 func (c *Client) GetPublicMapData(category, timeRange string) ([]PublicMapPoint, error) {
-	query := "/rest/v1/complaints?select=latitude,longitude,address,status,priority,category:categories(name,name_ar,icon)&latitude=not.is.null&longitude=not.is.null&order=created_at.desc"
+	query := "/rest/v1/complaints?select=latitude,longitude,address,status,priority,category:categories(id,name,name_ar,icon)&latitude=not.is.null&longitude=not.is.null&order=created_at.desc"
 
 	// Apply time filter
 	if timeRange != "" && timeRange != "all" {
@@ -1028,9 +1029,25 @@ func (c *Client) GetPublicMapData(category, timeRange string) ([]PublicMapPoint,
 		query += "&created_at=gte." + fromDate
 	}
 
-	// Apply category filter
+	// Apply category filter - support both UUID and category name
 	if category != "" && category != "all" {
-		query += "&category_id=eq." + category
+		// Check if it's a valid UUID
+		if _, err := uuid.Parse(category); err == nil {
+			// It's a valid UUID, use directly
+			query += "&category_id=eq." + category
+		} else {
+			// It's a category name, look up the ID first
+			categories, err := c.GetCategories()
+			if err == nil {
+				for _, cat := range categories {
+					if strings.EqualFold(cat.Name, category) || strings.EqualFold(cat.NameAr, category) {
+						query += "&category_id=eq." + cat.ID.String()
+						break
+					}
+				}
+			}
+			// If category name not found, skip the filter (return all)
+		}
 	}
 
 	resp, err := c.doRequest("GET", query, nil, "")
