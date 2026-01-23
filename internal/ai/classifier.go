@@ -56,11 +56,13 @@ type OpenAIResponse struct {
 }
 
 type AIClassification struct {
-	CategoryName string  `json:"category_name"`
-	Priority     string  `json:"priority"`
-	Confidence   float64 `json:"confidence"`
-	Summary      string  `json:"summary_ar"`
-	Sentiment    string  `json:"sentiment"`
+	Rejected        bool    `json:"rejected"`
+	RejectionReason string  `json:"rejection_reason"`
+	CategoryName    string  `json:"category_name"`
+	Priority        string  `json:"priority"`
+	Confidence      float64 `json:"confidence"`
+	Summary         string  `json:"summary_ar"`
+	Sentiment       string  `json:"sentiment"`
 }
 
 func NewClassifier(client *supabase.Client) *Classifier {
@@ -116,14 +118,36 @@ func (c *Classifier) classifyWithAI(title, description string, imageURLs []strin
 - استخدم المعلومات المرئية لتحسين دقة التصنيف`
 	}
 
-	systemPrompt := `أنت مساعد ذكي لنظام حكيم لإدارة شكاوى المواطنين في المملكة العربية السعودية.
-مهمتك تحليل الشكاوى وتصنيفها.
+	systemPrompt := `أنت مساعد ذكي لنظام حكيم لإدارة شكاوى المواطنين في المملكة الأردنية الهاشمية.
+مهمتك تحليل الشكاوى وتصنيفها وفلترة البلاغات غير الصالحة.
+
+⚠️ قواعد الفلترة المهمة - يجب رفض الشكوى إذا:
+1. كانت تحتوي على ألفاظ نابية أو إساءة
+2. كانت غير واضحة أو لا معنى لها (ترولينج/سبام)
+3. كانت شكوى شخصية لا علاقة لها بالخدمات الحكومية
+4. كانت تتعلق بأمور سياسية أو طائفية
+5. كانت تحتوي على معلومات كاذبة واضحة
+6. كانت طلب خدمة وليست شكوى (مثل: أريد معلومات عن...)
+7. كانت مكررة أو غير مفيدة (مثل: test, asdf, ههههه)
+
+إذا كانت الشكوى يجب رفضها، أرجع:
+{
+  "rejected": true,
+  "rejection_reason": "سبب الرفض بالعربية",
+  "category_name": "",
+  "priority": "low",
+  "confidence": 0.0,
+  "summary_ar": "",
+  "sentiment": "neutral"
+}
 
 التصنيفات المتاحة:
 ` + categoryList.String() + imageInstructions + `
 
-قم بالرد بصيغة JSON فقط بالشكل التالي:
+إذا كانت الشكوى صالحة، قم بالرد بصيغة JSON:
 {
+  "rejected": false,
+  "rejection_reason": "",
   "category_name": "اسم التصنيف بالإنجليزية",
   "priority": "low/medium/high/critical",
   "confidence": 0.0-1.0,
@@ -133,10 +157,12 @@ func (c *Classifier) classifyWithAI(title, description string, imageURLs []strin
 }
 
 معايير تحديد الأولوية:
-- critical: خطر على الحياة، طوارئ، انقطاع خدمات حيوية
-- high: مشاكل تؤثر على عدد كبير، أضرار مادية كبيرة
-- medium: مشاكل عادية تحتاج معالجة
-- low: استفسارات، اقتراحات، مشاكل بسيطة`
+- critical: خطر على الحياة، طوارئ، انقطاع خدمات حيوية عن منطقة كاملة
+- high: مشاكل تؤثر على عدد كبير، أضرار مادية كبيرة، انقطاع خدمات طويل
+- medium: مشاكل عادية تحتاج معالجة في وقت معقول
+- low: استفسارات بسيطة، اقتراحات، مشاكل ثانوية
+
+ملاحظة: هذا النظام للمملكة الأردنية الهاشمية. الجهات المتاحة تشمل الوزارات والهيئات الحكومية الأردنية.`
 
 	userPrompt := fmt.Sprintf("عنوان الشكوى: %s\n\nتفاصيل الشكوى: %s", title, description)
 
@@ -225,6 +251,11 @@ func (c *Classifier) classifyWithAI(title, description string, imageURLs []strin
 		return nil, fmt.Errorf("failed to parse AI classification: %w", err)
 	}
 
+	// Check if complaint was rejected by AI
+	if aiResult.Rejected {
+		return nil, fmt.Errorf("REJECTED: %s", aiResult.RejectionReason)
+	}
+
 	// Map category name to ID
 	result := &supabase.ClassificationResult{
 		Priority:   aiResult.Priority,
@@ -260,6 +291,11 @@ func (c *Classifier) classifyWithAI(title, description string, imageURLs []strin
 
 func (c *Classifier) classifyWithKeywords(title, description string) (*supabase.ClassificationResult, error) {
 	text := strings.ToLower(title + " " + description)
+
+	// Basic spam/junk filter
+	if isJunkComplaint(title, description) {
+		return nil, fmt.Errorf("REJECTED: الشكوى غير صالحة أو غير واضحة")
+	}
 
 	result := &supabase.ClassificationResult{
 		Priority:   "medium",
@@ -324,5 +360,47 @@ func containsAny(text string, keywords []string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// isJunkComplaint checks if the complaint is spam, trolling, or inappropriate
+func isJunkComplaint(title, description string) bool {
+	text := strings.ToLower(title + " " + description)
+
+	// Too short to be a valid complaint
+	if len(strings.TrimSpace(title)) < 5 || len(strings.TrimSpace(description)) < 10 {
+		return true
+	}
+
+	// Test/spam patterns
+	spamPatterns := []string{
+		"test", "testing", "asdf", "qwerty", "aaaa", "1234", "xxxx",
+		"تجربة", "تست", "اختبار فقط",
+		"ههههه", "هاها", "lol", "haha",
+	}
+	for _, pattern := range spamPatterns {
+		if strings.Contains(text, pattern) && len(text) < 50 {
+			return true
+		}
+	}
+
+	// Offensive content patterns (basic filter)
+	offensivePatterns := []string{
+		"حمار", "غبي", "كلب", "خنزير", "لعنة",
+	}
+	for _, pattern := range offensivePatterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+
+	// Repeated characters (e.g., "aaaaaaaaaa")
+	for _, r := range []rune{'a', 'ا', 'ه', 'x', '.'} {
+		repeated := strings.Repeat(string(r), 5)
+		if strings.Contains(text, repeated) {
+			return true
+		}
+	}
+
 	return false
 }

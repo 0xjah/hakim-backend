@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -47,8 +48,15 @@ func (h *ComplaintHandler) Create(c *fiber.Ctx) error {
 	// AI classification with image support
 	classification, err := h.classifier.ClassifyWithImages(req.Title, req.Description, req.Attachments)
 	if err != nil {
+		errStr := err.Error()
+		// Check if the complaint was rejected by AI
+		if strings.HasPrefix(errStr, "REJECTED:") {
+			rejectionReason := strings.TrimPrefix(errStr, "REJECTED: ")
+			slog.Info("Complaint rejected by AI", "reason", rejectionReason, "title", req.Title)
+			return utils.JSONError(c, fiber.StatusBadRequest, rejectionReason)
+		}
 		slog.Warn("AI classification failed", "error", err)
-		// Continue without classification
+		// Continue without classification for other errors
 	}
 
 	// If no category provided, use AI suggestion
